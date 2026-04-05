@@ -11,6 +11,11 @@ import pickle
 import numpy as np
 import pandas as pd
 import os
+from textblob import TextBlob
+chat_history = []
+fallback_memory = []
+
+
 
 app = Flask(__name__)
 CORS(app)
@@ -197,6 +202,100 @@ def predict():
         **recommendations
     }), 200
 
+
+@app.route("/psychologist", methods=["POST"])
+def psychologist():
+    data = request.get_json()
+
+    if not data or "text" not in data:
+        return jsonify({"error": "Missing 'text'"}), 400
+
+    user_input = data["text"]
+    
+    # Store user message
+    fallback_memory.append({"role": "user", "content": user_input})
+
+    text = user_input.lower()
+    blob = TextBlob(user_input)
+    polarity = blob.sentiment.polarity
+
+    # Get previous message for context (last USER message only)
+    previous = ""
+    for msg in reversed(fallback_memory[:-1]):  
+        if msg["role"] == "user":
+            previous = msg["content"]
+            break
+
+    def build_response(emotion, intro, suggestions):
+        reply_text = intro + "\n\nHere are a few things you could try:\n• " + "\n• ".join(suggestions)
+        # Save bot reply
+        fallback_memory.append({"role": "assistant", "content": reply_text})
+        return {
+            "emotion": emotion,
+            "reply": reply_text,
+            "source": "local_ai"
+        }
+
+    # 🔥 STRESS / ANXIETY
+    if any(word in text for word in ["stress", "stressed", "anxious", "anxiety", "overwhelmed"]):
+        return jsonify(build_response(
+            "Stressed",
+            f"It sounds like you're feeling overwhelmed. Earlier you mentioned: '{previous}'. I'm here with you — let's take this step by step.",
+            ["Take 5 slow deep breaths (inhale 4s, exhale 6s)", "Break your work into smaller tasks", "Take a short break to reset your mind"]
+        ))
+
+    # 🔥 SAD / LOW
+    elif any(word in text for word in ["sad", "depressed", "lonely", "tired", "exhausted", "down", "low"]):
+        return jsonify(build_response(
+            "Sad",
+            f"I'm really sorry you're feeling this way. Earlier you said: '{previous}'. You don’t have to go through this alone — I’m here for you.",
+            ["Talk to someone you trust", "Get proper rest — your body might need it", "Do something comforting like music or a walk"]
+        ))
+
+    # 🔥 ANGER
+    elif any(word in text for word in ["angry", "frustrated", "irritated"]):
+        return jsonify(build_response(
+            "Angry",
+            f"It sounds like something is really frustrating you. Earlier you mentioned: '{previous}'. Let’s try to slow things down together.",
+            ["Take a pause before reacting", "Try deep breathing to calm your body", "Step away from the situation for a bit"]
+        ))
+
+    # 🔥 HAPPY
+    elif any(word in text for word in ["happy", "excited", "good", "great"]):
+        return jsonify(build_response(
+            "Happy",
+            f"That’s really nice to hear! 😊 Earlier you said: '{previous}'. It’s great that you're feeling this way.",
+            ["Take a moment to enjoy this feeling", "Share your happiness with someone", "Keep doing what made you feel this way"]
+        ))
+
+    # 🔥 CONFUSED / LOST
+    elif any(word in text for word in ["confused", "lost", "don't know", "uncertain"]):
+        return jsonify(build_response(
+            "Confused",
+            f"It sounds like you're feeling unsure right now. Earlier you mentioned: '{previous}'. That can be really overwhelming.",
+            ["Break things into smaller decisions", "Write down your thoughts to gain clarity", "Focus on what you can control right now"]
+        ))
+
+    # 🔥 FALLBACK TO SENTIMENT
+    else:
+        if polarity < -0.2:
+            return jsonify(build_response(
+                "Sad",
+                f"I can sense something might be bothering you. Earlier you said: '{previous}'. I'm here to listen.",
+                ["Take things one step at a time", "Express your thoughts freely", "Give yourself time to process things"]
+            ))
+        elif polarity > 0.3:
+            return jsonify(build_response(
+                "Positive",
+                f"You seem to be in a positive mindset. Earlier you mentioned: '{previous}'. That’s great to see 😊",
+                ["Keep nurturing this mindset", "Use this energy productively", "Spread positivity around you"]
+            ))
+        else:
+            return jsonify(build_response(
+                "Neutral",
+                f"I’m here with you. Earlier you mentioned: '{previous}'. If you want to share more, I’m listening.",
+                ["Take a moment to reflect", "Write down what you're feeling", "Take a short break to clear your mind"]
+            ))
 
 # ─────────────────────────────────────────
 # 5. RUN
